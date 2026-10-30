@@ -1,6 +1,35 @@
-# DNS Manager for Home Assistant
+# DNS Manager for Home Assistant on SwitchBot AI Hub
 
-Inspect `/etc/resolv.conf` inside Home Assistant and explicitly configure DNS servers with a restorable original backup. Version 0.2.0 adds administrator-only apply/restore actions to the original read-only diagnostic.
+Choose which DNS servers Home Assistant uses on your **SwitchBot AI Hub**, with a backup of the original configuration and an explicit restore action.
+
+## Why this integration exists
+
+On the SwitchBot AI Hub tested for this project, the embedded Home Assistant container was preconfigured to use these public DNS servers:
+
+```text
+nameserver 8.8.8.8
+nameserver 114.114.114.114
+```
+
+This can be a problem when you want Home Assistant to resolve local hostnames through your router, use a local DNS service such as Pi-hole or AdGuard Home, or operate on a network that restricts external DNS access.
+
+DNS Manager lets you choose your preferred DNS servers from the Home Assistant UI, without opening a shell inside the container. It changes the `/etc/resolv.conf` file visible to Home Assistant and can restore its original contents. It does not configure DNS for the entire AI Hub or its other applications.
+
+## Tested environment
+
+Verified on **October 30, 2026**, with the following combination:
+
+| Component | Tested version |
+| --- | --- |
+| SwitchBot AI Hub firmware | **V3.2** |
+| Home Assistant Core | **2026.10.4** (Home Assistant Container) |
+| DNS Manager | **0.2.0** |
+
+The two public DNS addresses above were observed on this tested installation. **Other AI Hub firmware versions, Home Assistant versions, devices, and installation types have not been tested.** This is not a claim that every AI Hub version uses the same defaults.
+
+Changing the DNS server, resolving names through the selected server, and keeping the change through a **normal Home Assistant restart** were verified. The resolver file's contents, hash, inode, and modification time remained unchanged after that restart, with **no automatic reapplication** by this integration.
+
+Persistence through an **AI Hub reboot, container recreation, or Home Assistant update has not been tested**. Backup and rollback behavior is covered by local tests; restoring the original DNS was not exercised on the live AI Hub after the successful change.
 
 ## Use
 
