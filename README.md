@@ -74,3 +74,11 @@ python3 -m compileall -q custom_components
 ```
 
 Tests use temporary files and mocked network lookups. They check read-only inspection, validation, preserving non-nameserver lines/inodes/modes, original backup, explicit restoration, concurrency hash guards and rollback. Local tests do not establish a particular appliance's write capability, mount isolation or restart persistence.
+
+## Development disclosure
+
+The integration code and documentation were generated with **OpenAI Codex** and refined using automated tests and the live-device checks documented above. The tested environment and verification limits are stated explicitly in this README.
+
+## License
+
+MIT License. See [LICENSE](LICENSE).
