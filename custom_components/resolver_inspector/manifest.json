@@ -1,6 +1,6 @@
 {
   "domain": "resolver_inspector",
-  "name": "Resolver Inspector",
+  "name": "DNS Manager",
   "version": "0.2.0",
   "config_flow": true,
   "documentation": "https://github.com/Yamar50/ha-resolver-tools",

@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Resolver Inspector",
+        "title": "DNS Manager",
         "description": "Inspect the local resolver and enable explicit administrator-only apply/restore actions. Setup and restart do not change DNS."
       }
     },

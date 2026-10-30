@@ -17,6 +17,8 @@ SIGNAL = DOMAIN + "_updated"
 
 
 async def async_setup_entry(hass, entry):
+    if entry.title == "Resolver Inspector":
+        hass.config_entries.async_update_entry(entry, title="DNS Manager")
     manager = ResolverManager(hass.config.path(".storage", "resolver_inspector_backup.json"))
     lock = asyncio.Lock()
     runtime = {"manager": manager, "lock": lock, "inspection": {}, "status": {}}
