@@ -60,6 +60,12 @@ Before a first write, inspect mount metadata to determine what owns the file and
 
 Restore the original DNS first if desired. Removing the integration or uninstalling its files does not restore DNS automatically and does not delete the backup. Restart as requested by HACS.
 
+## Development and validation
+
+GitHub Actions run the official HACS validation, hassfest, and the local unit tests on pushes and pull requests. No HACS checks are disabled.
+
+Version **0.2.1** adds HACS distribution metadata and brand icons; the DNS runtime logic is unchanged from the tested **0.2.0** version above.
+
 ## Local verification
 
 ```sh
