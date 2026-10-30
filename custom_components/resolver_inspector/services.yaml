@@ -1,3 +1,31 @@
 inspect:
   name: Inspect resolver configuration
-  description: Read /etc/resolv.conf, ownership, mode, effective-user access and filesystem read-only status. Administrator only. No writes, network calls, subprocesses or scheduled polling.
+  description: Administrator-only read of the fixed resolver file, permissions, mount and backup status. No DNS changes.
+check:
+  name: Check DNS resolution
+  description: Administrator-only on-demand DNS checks for api.switch-bot.com and www.home-assistant.io using configured servers and the system resolver.
+apply:
+  name: Apply DNS servers
+  description: Administrator only. Validate, back up the original resolver, change nameservers in place, and check resolution. Restore previous bytes if verification fails. Never applied at startup.
+  fields:
+    servers:
+      name: DNS server IP addresses
+      description: One to three literal IP addresses. Omit to use the candidate text entity.
+      example: ["192.0.2.53"]
+      selector:
+        object:
+    expected_sha256:
+      name: Current file SHA-256
+      description: Obtain content_sha256 from inspect immediately before applying.
+      required: true
+      selector:
+        text:
+restore:
+  name: Restore original DNS configuration
+  description: Administrator only. Restore the exact original bytes saved before the first apply. Never runs automatically at startup.
+  fields:
+    expected_sha256:
+      name: Current file SHA-256
+      required: true
+      selector:
+        text:

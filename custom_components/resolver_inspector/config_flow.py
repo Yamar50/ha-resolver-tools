@@ -1,4 +1,4 @@
-"""Enable one instance; no resolver or network settings are changed."""
+"""Enable one instance; setup does not change resolver settings."""
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow

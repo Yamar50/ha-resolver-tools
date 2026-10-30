@@ -13,6 +13,7 @@ def _inspect_path(path):
     result = {
         'path': str(path),
         'effective_uid': os.geteuid(),
+        'process_id': os.getpid(),
         'effective_gid': os.getegid(),
         'supplementary_groups': os.getgroups(),
         'configuration_changed': False,
@@ -30,6 +31,8 @@ def _inspect_path(path):
             owner_gid=target.st_gid,
             size_bytes=target.st_size,
             mtime_ns=target.st_mtime_ns,
+            inode=target.st_ino,
+            device=target.st_dev,
             filesystem_read_only=bool(os.statvfs(path).f_flag & os.ST_RDONLY),
         )
         if os.access in os.supports_effective_ids:

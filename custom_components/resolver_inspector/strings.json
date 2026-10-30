@@ -3,11 +3,37 @@
     "step": {
       "user": {
         "title": "Resolver Inspector",
-        "description": "Enable an administrator-only action to inspect /etc/resolv.conf. DNS settings and file permissions are not changed."
+        "description": "Inspect the local resolver and enable explicit administrator-only apply/restore actions. Setup and restart do not change DNS."
       }
     },
     "abort": {
       "single_instance_allowed": "Only one instance is needed."
+    }
+  },
+  "entity": {
+    "text": {
+      "candidate_servers": {
+        "name": "DNS server candidates"
+      }
+    },
+    "button": {
+      "apply": {
+        "name": "Apply DNS servers"
+      },
+      "restore": {
+        "name": "Restore original DNS"
+      },
+      "inspect": {
+        "name": "Refresh DNS status"
+      }
+    },
+    "sensor": {
+      "current_servers": {
+        "name": "Current DNS servers"
+      },
+      "last_result": {
+        "name": "Last DNS operation"
+      }
     }
   }
 }
