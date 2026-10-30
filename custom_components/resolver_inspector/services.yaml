@@ -1,0 +1,3 @@
+inspect:
+  name: Inspect resolver configuration
+  description: Read /etc/resolv.conf, ownership, mode, effective-user access and filesystem read-only status. Administrator only. No writes, network calls, subprocesses or scheduled polling.
