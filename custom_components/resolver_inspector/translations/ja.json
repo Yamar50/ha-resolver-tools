@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "DNS設定の診断",
+        "description": "/etc/resolv.confを読み取る管理者専用アクションを追加します。DNS設定やファイル権限は変更しません。"
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "この統合は1つだけ設定できます。"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Resolver Inspector",
+        "description": "Enable an administrator-only action to inspect /etc/resolv.conf. DNS settings and file permissions are not changed."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one instance is needed."
+    }
+  }
+}
