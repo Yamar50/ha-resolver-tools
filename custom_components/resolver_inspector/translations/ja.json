@@ -2,12 +2,38 @@
   "config": {
     "step": {
       "user": {
-        "title": "DNS設定の診断",
-        "description": "/etc/resolv.confを読み取る管理者専用アクションを追加します。DNS設定やファイル権限は変更しません。"
+        "title": "DNS Manager",
+        "description": "DNS設定の確認と、管理者による明示的な適用・復元を有効にします。導入時や再起動時にはDNSを書き換えません。"
       }
     },
     "abort": {
-      "single_instance_allowed": "この統合は1つだけ設定できます。"
+      "single_instance_allowed": "この統合は1つだけ登録できます。"
+    }
+  },
+  "entity": {
+    "text": {
+      "candidate_servers": {
+        "name": "DNSサーバー設定候補"
+      }
+    },
+    "button": {
+      "apply": {
+        "name": "DNS設定を適用"
+      },
+      "restore": {
+        "name": "元のDNS設定に戻す"
+      },
+      "inspect": {
+        "name": "DNS設定を再確認"
+      }
+    },
+    "sensor": {
+      "current_servers": {
+        "name": "現在のDNSサーバー"
+      },
+      "last_result": {
+        "name": "DNSの最終操作結果"
+      }
     }
   }
 }
