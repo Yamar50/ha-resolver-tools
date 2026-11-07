@@ -33,11 +33,13 @@ Persistence through an **AI Hub reboot, container recreation, or Home Assistant 
 
 ## Use
 
-1. In HACS, add `https://github.com/Yamar50/ha-resolver-tools` as a custom repository (Integration), download, and restart Home Assistant if requested.
+1. Open **HACS**, search for **DNS Manager**, open its repository page, and select **Download**. Restart Home Assistant if requested.
 2. Add **DNS Manager** in Settings → Devices & services.
 3. Open its **Home Assistant DNS** device. Enter one to three comma-separated IP addresses in **DNS server candidates**. This stores candidates only.
 4. Press **Apply DNS servers** as an administrator. The integration validates the IPs, checks each server, saves the original bytes, changes only nameserver lines and verifies system name resolution.
 5. Inspect **Current DNS servers** and **Last DNS operation**. **Restore original DNS** restores the original bytes saved before the first apply. **Refresh DNS status** rereads the file.
+
+If **DNS Manager** is not available in your HACS catalog yet, use the custom repository fallback: open the HACS menu → **Custom repositories**, add `https://github.com/Yamar50/ha-resolver-tools` with type **Integration**, then download it and continue with the steps above.
 
 **No startup reapplication, polling or automatic restart is implemented.** A restart reads the current file without writing it. Candidate values survive in Home Assistant's configuration, independently of whether the runtime resolver file survives. Host/container recreation and Home Assistant upgrades need separate verification; this integration cannot control the host's container DNS configuration.
 
