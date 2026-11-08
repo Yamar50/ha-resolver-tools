@@ -59,6 +59,117 @@ class ResolverChangeTests(unittest.TestCase):
         self.assertEqual(self.file.read_bytes(), b'nameserver 203.0.113.9\n')
         self.assertEqual(before.st_mtime_ns, self.file.stat().st_mtime_ns)
 
+    def enable(self):
+        self.apply()
+        self.manager.configure_startup(True)
+
+    def test_startup_disabled_by_default_even_after_apply(self):
+        self.apply()
+        self.file.write_bytes(self.original)
+        self.assertEqual(self.manager.reapply_on_startup()['result'], 'disabled')
+        self.assertEqual(self.file.read_bytes(), self.original)
+
+    def test_requires_successful_apply_and_does_not_guess_legacy_target(self):
+        with self.assertRaises(ValueError):
+            self.manager.configure_startup(True)
+        self.apply()
+        record = json.loads(self.backup.read_text())
+        del record['saved_servers']  # Existing 0.2.x backups only have hashes.
+        self.backup.write_text(json.dumps(record))
+        with self.assertRaises(ValueError):
+            self.manager.configure_startup(True)
+        self.assertFalse(self.manager.status()['startup_reapply'])
+
+    def test_startup_same_dns_does_not_write_or_probe(self):
+        self.enable()
+        current = b'# changed by host\noptions timeout:1\nnameserver 192.0.2.53 # comment\n'
+        self.file.write_bytes(current)
+        before = self.file.stat()
+        with patch.object(m, 'write_existing') as write, patch.object(m, 'probe_servers') as probe:
+            result = self.manager.reapply_on_startup()
+        write.assert_not_called()
+        probe.assert_not_called()
+        self.assertEqual(result['result'], 'already_matches')
+        self.assertEqual(self.file.read_bytes(), current)
+        self.assertEqual(self.file.stat().st_mtime_ns, before.st_mtime_ns)
+
+    def test_startup_reapplies_saved_target_after_container_file_replaced(self):
+        self.enable()
+        self.file.unlink()
+        current = b'search new.example\nnameserver 203.0.113.53\n'
+        self.file.write_bytes(current)
+        before = self.file.stat()
+        restarted = m.ResolverManager(self.backup, self.file)
+        self.assertEqual(restarted.reapply_on_startup()['result'], 'reapplied')
+        self.assertEqual(self.file.read_bytes(), current.replace(b'203.0.113.53', b'192.0.2.53'))
+        self.assertEqual(self.file.stat().st_ino, before.st_ino)
+        self.assertEqual(base64.b64decode(json.loads(self.backup.read_text())['original_b64']), self.original)
+        self.assertEqual(restarted.status()['startup_result'], 'reapplied')
+        self.assertTrue(restarted.status()['startup_reapply'])
+
+    def test_startup_compares_dns_order(self):
+        self.manager.apply(['192.0.2.53', '198.51.100.53'], m.digest(self.original))
+        self.manager.configure_startup(True)
+        self.file.write_bytes(b'nameserver 198.51.100.53\nnameserver 192.0.2.53\n')
+        self.assertEqual(self.manager.reapply_on_startup()['result'], 'reapplied')
+        self.assertEqual(m.nameservers(self.file.read_text()), ['192.0.2.53', '198.51.100.53'])
+
+    def test_startup_equivalent_ipv6_does_not_write(self):
+        self.manager.apply(['2001:db8::53'], m.digest(self.original))
+        self.manager.configure_startup(True)
+        self.file.write_text('nameserver 2001:0db8:0:0:0:0:0:53\n')
+        before = self.file.stat().st_mtime_ns
+        self.assertEqual(self.manager.reapply_on_startup()['result'], 'already_matches')
+        self.assertEqual(self.file.stat().st_mtime_ns, before)
+
+    def test_startup_unreachable_target_keeps_file(self):
+        self.enable()
+        self.file.write_bytes(self.original)
+        with patch.object(m, 'probe_servers', side_effect=TimeoutError), self.assertRaises(ValueError):
+            self.manager.reapply_on_startup()
+        self.assertEqual(self.file.read_bytes(), self.original)
+        self.assertEqual(self.manager.status()['startup_result'], 'failed')
+        self.assertTrue(self.manager.status()['startup_reapply'])
+
+    def test_startup_verification_failure_rolls_back_and_requires_manual_recovery(self):
+        self.enable()
+        self.file.write_bytes(self.original)
+        with patch.object(m, 'system_probe', side_effect=OSError), self.assertRaises(ValueError):
+            self.manager.reapply_on_startup()
+        self.assertEqual(self.file.read_bytes(), self.original)
+        with patch.object(m, 'write_existing') as write, self.assertRaises(ValueError):
+            self.manager.reapply_on_startup()
+        write.assert_not_called()
+
+    def test_interrupted_apply_is_not_replayed(self):
+        self.enable()
+        record = json.loads(self.backup.read_text())
+        record['status'] = 'apply_pending'
+        self.backup.write_text(json.dumps(record))
+        with patch.object(m, 'write_existing') as write, self.assertRaises(ValueError):
+            self.manager.reapply_on_startup()
+        write.assert_not_called()
+
+    def test_failed_manual_apply_does_not_replace_saved_target(self):
+        self.enable()
+        with patch.object(m, 'system_probe', side_effect=OSError), self.assertRaises(ValueError):
+            self.manager.apply(['203.0.113.53'], m.digest(self.file.read_bytes()))
+        self.assertEqual(self.manager.status()['saved_servers'], ['192.0.2.53'])
+
+    def test_restore_disables_startup_policy(self):
+        self.enable()
+        self.manager.restore(m.digest(self.file.read_bytes()))
+        self.assertFalse(self.manager.status()['startup_reapply'])
+        self.assertEqual(self.manager.reapply_on_startup()['result'], 'disabled')
+        self.assertEqual(self.file.read_bytes(), self.original)
+
+    def test_turning_off_does_not_restore_or_change_dns(self):
+        self.enable()
+        before = self.file.read_bytes()
+        self.manager.configure_startup(False)
+        self.assertEqual(self.manager.reapply_on_startup()['result'], 'disabled')
+        self.assertEqual(self.file.read_bytes(), before)
+
     def test_stale_hash_refuses_changes(self):
         with self.assertRaises(ValueError):
             self.manager.apply(['192.0.2.53'], '0' * 64)
