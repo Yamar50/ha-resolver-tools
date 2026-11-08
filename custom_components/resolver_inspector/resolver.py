@@ -202,7 +202,55 @@ class ResolverManager:
         return {"backup_available": True, "last_result": record.get("status"),
                 "original_sha256": record["original_sha256"],
                 "last_applied_sha256": record.get("applied_sha256"),
-                "updated_at": record.get("updated_at"), "startup_reapply": False}
+                "updated_at": record.get("updated_at"),
+                "startup_reapply": record.get("startup_reapply", False),
+                "saved_servers": record.get("saved_servers", []),
+                "startup_result": record.get("startup_result"),
+                "startup_checked_at": record.get("startup_checked_at")}
+
+    def configure_startup(self, enabled):
+        """Opt in explicitly; drafts and pre-upgrade hashes are not DNS targets."""
+        record = self._load()
+        if not record and not enabled:
+            return self.status()
+        if not record or (enabled and not record.get("saved_servers")):
+            raise ValueError("Apply DNS successfully with this version before enabling startup reapplication")
+        if enabled:
+            normalize_servers(record["saved_servers"])
+            if record.get("status") != "applied":
+                raise ValueError("Apply DNS successfully before enabling startup reapplication")
+        record["startup_reapply"] = enabled
+        self._save(record)
+        return self.status()
+
+    def reapply_on_startup(self):
+        """Check once at integration setup. Only a confirmed apply may be replayed."""
+        record = self._load()
+        if not record or not record.get("startup_reapply", False):
+            return {"result": "disabled"}
+        try:
+            if record.get("status") != "applied":
+                raise ValueError("Previous DNS operation was not successful; manual inspection required")
+            servers = normalize_servers(record.get("saved_servers"))
+            before = read_regular(self.path)
+            current = nameservers(before.decode("utf-8", errors="strict"))
+            try:
+                current = [str(ipaddress.ip_address(value)) for value in current]
+            except ValueError:
+                pass  # An invalid current value differs from the validated target.
+            if current == servers:
+                result = {"result": "already_matches", "servers": servers}
+            else:
+                result = {**self.apply(servers, digest(before)), "result": "reapplied"}
+        except (OSError, ValueError) as error:
+            record = self._load()
+            record.update(startup_result="failed", startup_checked_at=datetime.now(timezone.utc).isoformat())
+            self._save(record)
+            raise ValueError(f"Startup DNS reapplication failed: {error}") from error
+        record = self._load()
+        record.update(startup_result=result["result"], startup_checked_at=datetime.now(timezone.utc).isoformat())
+        self._save(record)
+        return result
 
     def apply(self, servers, expected_sha256):
         servers = normalize_servers(servers)
@@ -213,6 +261,7 @@ class ResolverManager:
         preflight = probe_servers(servers)
         record = self._load() or {"schema_version": 1, "original_b64": base64.b64encode(before).decode(),
                                   "original_sha256": digest(before)}
+        previous_servers = record.get("saved_servers")
         record.update(status="apply_pending", applied_sha256=digest(replacement),
                       updated_at=datetime.now(timezone.utc).isoformat())
         self._save(record)  # Durable original before touching the resolver.
@@ -221,9 +270,13 @@ class ResolverManager:
             write_existing(self.path, expected_sha256, replacement)
             changed = True
             resolved = system_probe()
-            record["status"] = "applied"
+            record.update(status="applied", saved_servers=servers)
             self._save(record)
         except Exception as error:
+            if previous_servers is None:
+                record.pop("saved_servers", None)
+            else:
+                record["saved_servers"] = previous_servers
             if changed:
                 try:
                     write_existing(self.path, digest(replacement), before)
@@ -236,13 +289,19 @@ class ResolverManager:
             raise ValueError(record["status"]) from error
         return {"result": "applied", "servers": servers, "sha256": digest(replacement),
                 "direct_dns_checks": preflight, "system_dns_checks": resolved,
-                "startup_reapply": False}
+                "startup_reapply": record.get("startup_reapply", False)}
 
     def restore(self, expected_sha256):
         record = self._load()
         if not record:
             raise ValueError("No original backup exists")
         original = base64.b64decode(record["original_b64"], validate=True)
+        # Disable before restoring so a later restart cannot undo a restoration,
+        # including an interrupted restore. Refuse stale callers before saving.
+        if digest(read_regular(self.path)) != expected_sha256:
+            raise ValueError("Resolver changed since inspection; inspect again")
+        record["startup_reapply"] = False
+        self._save(record)
         write_existing(self.path, expected_sha256, original)
         record.update(status="restored", updated_at=datetime.now(timezone.utc).isoformat())
         self._save(record)
