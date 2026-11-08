@@ -60,7 +60,7 @@ All actions require an administrator (or Home Assistant's own automation context
 
 Backups live in `/config/.storage/resolver_inspector_backup.json` (relative to the actual HA configuration directory), mode0600, with an integrity hash. Do not delete that backup before restoration. Writes preserve the existing resolver inode, mount, owner and mode. A normal write or verification failure attempts rollback; interruption or a failed rollback can require explicit restoration. A pending/failed write is reported and is not replayed at startup. System resolver caches and already-open connections can delay effective changes; a successful lookup alone cannot prove the upstream used by every integration.
 
-Before a first write, inspect mount metadata to determine what owns the file and whether a change could affect a shared runtime. Availability of read/write access does not establish mount isolation. Changes affect the resolver file visible inside HA, not necessarily every application on the appliance. DNS probes are sent only when explicitly checking or applying, to the configured candidate servers. Results are not uploaded or logged by this integration. Reads can update access timestamps.
+Before a first write, inspect mount metadata to determine what owns the file and whether a change could affect a shared runtime. Availability of read/write access does not establish mount isolation. Changes affect the resolver file visible inside HA, not necessarily every application on the appliance. DNS probes are sent when checking or applying, including an enabled startup reapplication, to the selected DNS servers. Results are not uploaded; startup success or failure is logged locally. Reads can update access timestamps.
 
 ## Remove
 
