@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "DNS Manager",
-        "description": "Inspect the local resolver and enable explicit administrator-only apply/restore actions. Setup and restart do not change DNS."
+        "description": "Inspect DNS and enable administrator-only apply/restore actions. Startup reapplication is disabled by default."
       }
     },
     "abort": {
@@ -33,6 +33,11 @@
       },
       "last_result": {
         "name": "Last DNS operation"
+      }
+    },
+    "switch": {
+      "startup_reapply": {
+        "name": "Reapply saved DNS at startup"
       }
     }
   }

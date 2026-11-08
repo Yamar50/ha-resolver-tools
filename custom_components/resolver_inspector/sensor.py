@@ -24,5 +24,9 @@ class ResolverSensor(ResolverEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         runtime = self.entry.runtime_data
-        return {"startup_reapply": False, "file_sha256": runtime["inspection"].get("content_sha256"),
+        return {"startup_reapply": runtime["status"].get("startup_reapply", False),
+                "saved_servers": runtime["status"].get("saved_servers", []),
+                "startup_result": runtime["status"].get("startup_result"),
+                "startup_checked_at": runtime["status"].get("startup_checked_at"),
+                "file_sha256": runtime["inspection"].get("content_sha256"),
                 "backup_available": runtime["status"].get("backup_available", False)}

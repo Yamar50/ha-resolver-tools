@@ -6,7 +6,7 @@ check:
   description: Administrator-only on-demand DNS checks for api.switch-bot.com and www.home-assistant.io using configured servers and the system resolver.
 apply:
   name: Apply DNS servers
-  description: Administrator only. Validate, back up the original resolver, change nameservers in place, and check resolution. Restore previous bytes if verification fails. Never applied at startup.
+  description: Administrator only. Validate, back up, apply and check DNS resolution. Save successfully applied servers for optional startup reapplication. Restore previous bytes if verification fails.
   fields:
     servers:
       name: DNS server IP addresses
@@ -22,10 +22,19 @@ apply:
         text:
 restore:
   name: Restore original DNS configuration
-  description: Administrator only. Restore the exact original bytes saved before the first apply. Never runs automatically at startup.
+  description: Administrator only. Disable startup reapplication and restore the exact original bytes saved before the first apply. Never runs automatically.
   fields:
     expected_sha256:
       name: Current file SHA-256
       required: true
       selector:
         text:
+configure_startup:
+  name: Configure startup DNS reapplication
+  description: Administrator only. Enable or disable checking the last successfully applied DNS at integration startup. Requires a successful apply with version 0.3.0 or later. Does not immediately change DNS.
+  fields:
+    enabled:
+      name: Reapply saved DNS at startup
+      required: true
+      selector:
+        boolean:
