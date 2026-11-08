@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "DNS Manager",
-        "description": "DNS設定の確認と、管理者による明示的な適用・復元を有効にします。導入時や再起動時にはDNSを書き換えません。"
+        "description": "DNS設定の確認と、管理者による適用・復元を有効にします。起動時の自動再適用は初期状態では無効です。"
       }
     },
     "abort": {
@@ -33,6 +33,11 @@
       },
       "last_result": {
         "name": "DNSの最終操作結果"
+      }
+    },
+    "switch": {
+      "startup_reapply": {
+        "name": "起動時に保存済みDNSを再適用"
       }
     }
   }
