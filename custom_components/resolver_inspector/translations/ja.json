@@ -25,6 +25,9 @@
       },
       "inspect": {
         "name": "DNS設定を再確認"
+      },
+      "refresh_runtime": {
+        "name": "稼働中のHA DNSへ再反映"
       }
     },
     "sensor": {
@@ -33,6 +36,9 @@
       },
       "last_result": {
         "name": "DNSの最終操作結果"
+      },
+      "runtime_servers": {
+        "name": "稼働中のHA DNSサーバー"
       }
     },
     "switch": {
