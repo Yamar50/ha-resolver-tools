@@ -5,7 +5,7 @@ from .entity import ResolverEntity
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    async_add_entities([ResolverButton(entry, name) for name in ("apply", "restore", "inspect")])
+    async_add_entities([ResolverButton(entry, name) for name in ("apply", "restore", "inspect", "refresh_runtime")])
 
 
 class ResolverButton(ResolverEntity, ButtonEntity):

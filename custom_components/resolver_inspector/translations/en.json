@@ -25,6 +25,9 @@
       },
       "inspect": {
         "name": "Refresh DNS status"
+      },
+      "refresh_runtime": {
+        "name": "Refresh running HA DNS"
       }
     },
     "sensor": {
@@ -33,6 +36,9 @@
       },
       "last_result": {
         "name": "Last DNS operation"
+      },
+      "runtime_servers": {
+        "name": "Running HA DNS servers"
       }
     },
     "switch": {
