@@ -198,12 +198,13 @@ class ResolverManager:
     def status(self):
         record = self._load()
         if not record:
-            return {"backup_available": False, "last_result": "never_applied", "startup_reapply": False}
+            return {"backup_available": False, "last_result": "never_applied", "startup_reapply": False, "watchdog_enabled": False}
         return {"backup_available": True, "last_result": record.get("status"),
                 "original_sha256": record["original_sha256"],
                 "last_applied_sha256": record.get("applied_sha256"),
                 "updated_at": record.get("updated_at"),
                 "startup_reapply": record.get("startup_reapply", False),
+                "watchdog_enabled": record.get("watchdog_enabled", False),
                 "saved_servers": record.get("saved_servers", []),
                 "startup_result": record.get("startup_result"),
                 "startup_checked_at": record.get("startup_checked_at")}
@@ -220,6 +221,21 @@ class ResolverManager:
             if record.get("status") != "applied":
                 raise ValueError("Apply DNS successfully before enabling startup reapplication")
         record["startup_reapply"] = enabled
+        self._save(record)
+        return self.status()
+
+    def configure_watchdog(self, enabled):
+        """Separate opt-in: existing startup users do not gain periodic writes."""
+        record = self._load()
+        if not record and not enabled:
+            return self.status()
+        if not record:
+            raise ValueError("Apply DNS successfully before enabling automatic repair")
+        if enabled:
+            normalize_servers(record.get("saved_servers"))
+            if record.get("status") != "applied":
+                raise ValueError("Apply DNS successfully before enabling automatic repair")
+        record["watchdog_enabled"] = enabled
         self._save(record)
         return self.status()
 
@@ -301,8 +317,9 @@ class ResolverManager:
         if digest(read_regular(self.path)) != expected_sha256:
             raise ValueError("Resolver changed since inspection; inspect again")
         record["startup_reapply"] = False
+        record["watchdog_enabled"] = False
         self._save(record)
         write_existing(self.path, expected_sha256, original)
         record.update(status="restored", updated_at=datetime.now(timezone.utc).isoformat())
         self._save(record)
-        return {"result": "restored", "sha256": digest(original), "startup_reapply": False}
+        return {"result": "restored", "sha256": digest(original), "startup_reapply": False, "watchdog_enabled": False}

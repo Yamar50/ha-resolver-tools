@@ -35,15 +35,28 @@
         "name": "現在のDNSサーバー"
       },
       "last_result": {
-        "name": "DNSの最終操作結果"
+        "name": "DNSファイルの最終操作結果（過去）"
       },
       "runtime_servers": {
         "name": "稼働中のHA DNSサーバー"
+      },
+      "monitor_status": {
+        "name": "DNS監視状態",
+        "state": {
+          "disabled": "無効",
+          "pending": "確認待ち",
+          "healthy": "正常",
+          "retry_pending": "再試行待ち",
+          "manual_action_required": "手動確認が必要"
+        }
       }
     },
     "switch": {
       "startup_reapply": {
         "name": "起動時に保存済みDNSを再適用"
+      },
+      "watchdog_enabled": {
+        "name": "5分ごとにDNSを監視・自動修復"
       }
     }
   }

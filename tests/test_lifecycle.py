@@ -33,6 +33,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         module("homeassistant.exceptions", HomeAssistantError=HAError)
         module("homeassistant.helpers", __path__=[])
         module("homeassistant.helpers.aiohttp_client", DATA_CONNECTOR="connectors", DATA_RESOLVER="resolver")
+        module("homeassistant.helpers.event", async_track_time_interval=lambda h, fn, interval: h.timers.append((fn, interval)) or Mock())
         module("homeassistant.helpers.dispatcher", async_dispatcher_send=lambda *args: None)
         module("homeassistant.helpers.service", async_register_admin_service=lambda h, d, n, fn, **kw: h.actions.update({n: fn}))
         cls.modules = patch.dict(sys.modules, modules)
@@ -66,8 +67,8 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.manager.restore.side_effect = self.restore_file
         self.hass = SimpleNamespace(
             data={"resolver": self.resolver, "connectors": {"default": self.connector}},
-            actions={}, is_running=False, config=SimpleNamespace(path=lambda *p: "/unused-test-backup"),
-            bus=SimpleNamespace(async_listen_once=self.listen),
+            actions={}, timers=[], is_running=False, config=SimpleNamespace(path=lambda *p: "/unused-test-backup"),
+            bus=SimpleNamespace(async_listen_once=self.listen, async_fire=Mock()),
             config_entries=SimpleNamespace(async_forward_entry_setups=AsyncMock(), async_unload_platforms=AsyncMock(return_value=True)),
             services=SimpleNamespace(async_remove=Mock()))
         async def executor(fn, *args):
@@ -166,6 +167,27 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unload_unregisters_new_service_and_listener_is_entry_owned(self):
         await self.setup()
-        self.entry.async_on_unload.assert_called_once()
+        self.assertEqual(self.entry.async_on_unload.call_count, 2)
         self.assertTrue(await self.integration.async_unload_entry(self.hass, self.entry))
         self.hass.services.async_remove.assert_any_call("resolver_inspector", "refresh_runtime")
+
+    async def test_timer_is_five_minutes_and_skips_concurrent_work(self):
+        await self.setup()
+        fn, interval = self.hass.timers[0]
+        self.assertEqual(interval.total_seconds(), 300)
+        checked = self.entry.runtime_data["monitor"]["checked_at"]
+        async with self.entry.runtime_data["lock"]:
+            await fn(None)
+        self.assertEqual(checked, self.entry.runtime_data["monitor"]["checked_at"])
+        await fn(None)
+        self.assertNotEqual(checked, self.entry.runtime_data["monitor"]["checked_at"])
+
+    async def test_configure_periodic_and_unload_services(self):
+        await self.setup()
+        self.manager.configure_watchdog.side_effect = lambda enabled: self.status.update(watchdog_enabled=enabled)
+        await self.call("configure_watchdog", enabled=True)
+        self.assertEqual(self.entry.runtime_data["monitor"]["status"], "retry_pending")  # fixture omits file hash
+        await self.call("configure_watchdog", enabled=False)
+        self.assertEqual(self.entry.runtime_data["monitor"]["status"], "disabled")
+        await self.integration.async_unload_entry(self.hass, self.entry)
+        self.hass.services.async_remove.assert_any_call("resolver_inspector", "monitor_now")

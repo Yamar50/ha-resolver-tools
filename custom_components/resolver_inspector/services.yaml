@@ -22,7 +22,7 @@ apply:
         text:
 restore:
   name: Restore original DNS configuration
-  description: Administrator only. Disable startup reapplication, restore the exact original bytes, then refresh HA's running shared resolver. Never runs automatically.
+  description: Administrator only. Disable startup and periodic reapplication, restore the exact original bytes, then refresh HA's running shared resolver. Never runs automatically.
   fields:
     expected_sha256:
       name: Current file SHA-256
@@ -41,3 +41,15 @@ configure_startup:
 refresh_runtime:
   name: Refresh running HA DNS
   description: Administrator only. Reload the current resolver file into HA's existing shared DNS resolver, verify server addresses and clear its connector DNS caches. Does not write the file, change the saved target or close connections. Reports unsupported runtimes and mismatches.
+configure_watchdog:
+  name: Configure periodic DNS repair
+  description: Enable or disable the five-minute comparison and repair of saved, file and runtime DNS. Requires a successful apply. Enabling also checks immediately; candidates are never replayed.
+  fields:
+    enabled:
+      name: Monitor and repair DNS every 5 minutes
+      required: true
+      selector:
+        boolean:
+monitor_now:
+  name: Check DNS monitor now
+  description: Compare current file and runtime against the saved target and repair only if periodic repair is enabled. One attempt; failed attempts wait for the next five-minute tick. Returns monitor status.

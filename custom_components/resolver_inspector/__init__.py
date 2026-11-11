@@ -3,17 +3,20 @@
 import asyncio
 import ipaddress
 import logging
+from datetime import timedelta
 import voluptuous as vol
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import DATA_CONNECTOR, DATA_RESOLVER
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.service import async_register_admin_service
 
 from .inspect import inspect_resolver
 from .resolver import PROBE_NAMES, ResolverManager, mount_info, nameservers, normalize_servers, probe_servers, system_probe
 from .runtime import RuntimeRefreshError, inspect_runtime, probe_runtime, refresh_runtime
+from .watchdog import DNSWatchdog, INTERVAL_SECONDS
 
 DOMAIN = "resolver_inspector"
 PLATFORMS = [Platform.TEXT, Platform.BUTTON, Platform.SENSOR, Platform.SWITCH]
@@ -35,6 +38,7 @@ async def async_setup_entry(hass, entry):
         runtime["status"] = await hass.async_add_executor_job(manager.status)
         runtime["runtime_dns"] = inspect_runtime(hass.data.get(DATA_RESOLVER))
         async_dispatcher_send(hass, SIGNAL)
+        return runtime
 
     async def sync_runtime(expected=None):
         await refresh()
@@ -59,7 +63,8 @@ async def async_setup_entry(hass, entry):
             await refresh()
             return {**runtime["inspection"], "mount": await hass.async_add_executor_job(mount_info),
                     "management": runtime["status"], "runtime_dns": runtime["runtime_dns"],
-                    "last_runtime_refresh": runtime["last_runtime_refresh"]}
+                    "last_runtime_refresh": runtime["last_runtime_refresh"],
+                    "monitor": dict(watchdog.state)}
 
     async def check_action(call):
         async with lock:
@@ -77,6 +82,7 @@ async def async_setup_entry(hass, entry):
             try:
                 result = await hass.async_add_executor_job(manager.apply, servers, call.data["expected_sha256"])
                 result["runtime_refresh"] = await sync_runtime(result["servers"])
+                await watchdog.check(repair=False)
             except (OSError, ValueError) as error:
                 raise HomeAssistantError(str(error)) from error
             finally:
@@ -88,6 +94,7 @@ async def async_setup_entry(hass, entry):
             try:
                 result = await hass.async_add_executor_job(manager.restore, call.data["expected_sha256"])
                 result["runtime_refresh"] = await sync_runtime()
+                await watchdog.check(repair=False)
                 return result
             except (OSError, ValueError) as error:
                 raise HomeAssistantError(str(error)) from error
@@ -107,6 +114,41 @@ async def async_setup_entry(hass, entry):
             finally:
                 await refresh()
 
+    async def apply_saved(servers, digest):
+        return await hass.async_add_executor_job(manager.apply, servers, digest)
+
+    def emit_status(event):
+        hass.bus.async_fire(DOMAIN + "_status", event)
+        if event["kind"] == "recovered":
+            _LOGGER.info("DNS_MONITOR recovered: saved, file and running DNS match")
+        else:
+            _LOGGER.warning("DNS_MONITOR %s: %s", event["kind"], event.get("error") or "DNS mismatch")
+
+    watchdog = DNSWatchdog(refresh, apply_saved, sync_runtime, emit_status)
+    runtime["monitor"] = watchdog.state
+
+    async def monitor_now_action(call):
+        async with lock:
+            result = await watchdog.check()
+            async_dispatcher_send(hass, SIGNAL)
+            return result
+
+    async def configure_watchdog_action(call):
+        async with lock:
+            try:
+                await hass.async_add_executor_job(manager.configure_watchdog, call.data["enabled"])
+            except (OSError, ValueError) as error:
+                raise HomeAssistantError(str(error)) from error
+            result = await watchdog.check()
+            async_dispatcher_send(hass, SIGNAL)
+            return result
+
+    async def periodic(now):
+        # Do not queue checks behind a slow/manual operation. The next tick retries.
+        if lock.locked():
+            return
+        await monitor_now_action(None)
+
     empty = vol.Schema({})
     digest_schema = {vol.Required("expected_sha256"): vol.Match(r"^[a-f0-9]{64}$")}
     actions = {
@@ -116,11 +158,13 @@ async def async_setup_entry(hass, entry):
         "restore": (restore_action, vol.Schema(digest_schema)),
         "configure_startup": (configure_startup_action, vol.Schema({vol.Required("enabled"): bool})),
         "refresh_runtime": (refresh_runtime_action, empty),
+        "monitor_now": (monitor_now_action, empty),
+        "configure_watchdog": (configure_watchdog_action, vol.Schema({vol.Required("enabled"): bool})),
     }
     for name, (action, schema) in actions.items():
         async_register_admin_service(hass, DOMAIN, name, action, schema=schema,
                                      supports_response=SupportsResponse.OPTIONAL)
-    # Also runs on integration reload. No background polling or draft replay.
+    # The existing startup policy remains independent from periodic repair.
     async with lock:
         try:
             result = await hass.async_add_executor_job(manager.reapply_on_startup)
@@ -148,6 +192,9 @@ async def async_setup_entry(hass, entry):
 
     if not hass.is_running:
         entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, started))
+    entry.async_on_unload(async_track_time_interval(hass, periodic, timedelta(seconds=INTERVAL_SECONDS)))
+    async with lock:
+        await watchdog.check(repair=False)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -155,6 +202,6 @@ async def async_setup_entry(hass, entry):
 async def async_unload_entry(hass, entry):
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
-    for name in ("inspect", "check", "apply", "restore", "configure_startup", "refresh_runtime"):
+    for name in ("inspect", "check", "apply", "restore", "configure_startup", "refresh_runtime", "configure_watchdog", "monitor_now"):
         hass.services.async_remove(DOMAIN, name)
     return True

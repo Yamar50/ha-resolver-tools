@@ -35,28 +35,62 @@ On November 10, file reapplication was confirmed successful, but the running HA 
 
 Version **0.4.0** was checked on the same HA installation on **November 10, 2026**, with HA **2026.10.4**, aiohttp **3.14.5**, aiohttp-asyncmdnsresolver **0.2.0**, aiodns **4.0.4**, pycares **5.0.1** and c-ares **1.34.6**. An isolated process using these installed libraries reproduced a stale resolver after a temporary configuration file changed; the runtime refresh updated that existing resolver and its lookups succeeded. After backing up and deploying the integration, a normal HA restart, the startup refresh and an explicit refresh action succeeded. The running HA resolver reported the selected server, and packet observation confirmed its test queries used that server and received successful replies. Firmware was not rechecked for this follow-up. A full AI Hub reboot or container recreation was not performed; startup lifecycle and simulated file replacement are also covered by local tests.
 
+Version **0.5.0** was verified on this installation with HA **2026.11.0** on **November 11, 2026**. All 61 local tests also passed under the appliance's Python, and HA configuration validation passed before restart. A controlled duplicate entry for the same selected DNS address was repaired by the actual five-minute timer; file and running resolver readback matched afterward. Both mismatch and recovery messages arrived at the configured Syslog receiver through Remote Logger. Network-unreachable retries were tested with controlled failures, without interrupting the live network. A full appliance reboot was not performed.
+
 ## Use
 
 1. Open **HACS**, search for **DNS Manager**, open its repository page, and select **Download**. Restart Home Assistant if requested.
 2. Add **DNS Manager** in Settings → Devices & services.
 3. Open its **Home Assistant DNS** device. Enter one to three comma-separated IP addresses in **DNS server candidates**. This stores candidates only.
 4. Press **Apply DNS servers** as an administrator. The integration validates the IPs, checks each server, saves the original bytes, changes only nameserver lines, verifies system name resolution and refreshes HA's running shared resolver.
-5. Optionally enable **Reapply saved DNS at startup**. After upgrading from 0.2.x, press **Apply DNS servers** once first to save a validated target; older backups contain only a hash.
-6. Compare **Current DNS servers** (the file) with **Running HA DNS servers** (the shared resolver). Attributes show the saved target, startup policy, file result and runtime refresh result. **Restore original DNS** disables startup reapplication, restores the original bytes and refreshes the runtime. **Refresh DNS status** only reads status. **Refresh running HA DNS** explicitly reloads the current file without rewriting it.
+5. Optionally enable **Reapply saved DNS at startup** and/or **Monitor and repair DNS every 5 minutes**. Both are independent and disabled by default. After upgrading from 0.2.x, press **Apply DNS servers** once first to save a validated target; older backups contain only a hash.
+6. Compare **Current DNS servers** (the file) with **Running HA DNS servers** (the shared resolver). Attributes show the saved target, startup policy, file result and runtime refresh result. **DNS monitor status** shows current health separately from **Last DNS file operation (historical)**. **Restore original DNS** disables both automatic policies, restores the original bytes and refreshes the runtime. **Refresh DNS status** only reads status. **Refresh running HA DNS** explicitly reloads the current file without rewriting it.
 
 If **DNS Manager** is not available in your HACS catalog yet, use the custom repository fallback: open the HACS menu → **Custom repositories**, add `https://github.com/Yamar50/ha-resolver-tools` with type **Integration**, then download it and continue with the steps above.
 
 **Startup reapplication is opt-in and disabled by default.** Once enabled, integration startup (including reload) compares the current DNS addresses, in order, with the **last successfully applied servers** stored in the durable backup. Matching DNS leaves `/etc/resolv.conf` untouched, including its modification time. A mismatch uses the same preflight checks, hash guard, original backup and rollback as a manual apply. Non-nameserver directives in the current file are preserved. Editing candidates alone never changes the saved startup target. Turning the switch off leaves current DNS unchanged.
 
-There is one file reapplication attempt per integration startup, with no background polling or automatic HA restart. A failed preflight leaves the file unchanged; a file verification failure attempts rollback. Errors are logged and reported in `startup_result`. A previous interrupted or failed write requires a successful manual apply before replay.
+There is one file reapplication attempt per integration startup. The separate periodic policy described below can retry after startup failures. No automatic HA restart is performed. A failed preflight leaves the file unchanged; a file verification failure attempts rollback. Errors are logged and reported in `startup_result`. An interrupted or uncertain write requires a successful manual apply before replay. Periodic repair can retry after a verified rollback; the original startup policy remains conservative.
 
-With startup reapplication enabled, the runtime is refreshed even if the file already matches. A second runtime-only check runs once when HA finishes starting, to cover resolvers created during concurrent integration setup. If the file has changed away from the saved target meanwhile, that check reports the mismatch rather than silently adopting it. Other integrations can start concurrently, so queries may still use the host-provided DNS **before** DNS Manager loads. Host changes after startup are not continuously monitored or corrected.
+With startup reapplication enabled, the runtime is refreshed even if the file already matches. A second runtime-only check runs once when HA finishes starting, to cover resolvers created during concurrent integration setup. If the file has changed away from the saved target meanwhile, that check reports the mismatch rather than silently adopting it. Other integrations can start concurrently, so queries may still use the host-provided DNS **before** DNS Manager loads. Host changes after startup are checked every five minutes when periodic repair is enabled.
 
 Runtime refresh reuses the existing HA shared resolver and requests c-ares to reload its system configuration. It verifies the ordered IP addresses and standard DNS port, then clears DNS caches only on HA connectors using that resolver. Open connections and client sessions remain open. Explicit application DNS overrides are not forcibly replaced; an override which prevents the requested configuration from taking effect is reported as a mismatch. Integrations with their own resolvers, explicit DNS servers, and other AI Hub applications are outside this scope.
 
 The adapter checks for the required HA/aiohttp/pycares interfaces. An unsupported runtime, missing explicit nameservers or a refresh failure is reported separately. If the file was successfully applied but runtime refresh fails, **the file stays applied**, the action reports an error, and the runtime result explains the failure. A file result of `applied` alone does not mean the running resolver was updated. When no shared resolver exists yet, `not_initialized` is reported instead of claiming verification; a future resolver reads the current file.
 
 The integration was previously called **Resolver Inspector**. Its internal domain and action names remain `resolver_inspector` for compatibility. Existing entries are renamed on setup.
+
+## Five-minute monitoring and automatic repair
+
+Version **0.5.0** adds **Monitor and repair DNS every 5 minutes** and **DNS monitor status**. Enable the switch after successfully applying DNS. It uses the last successfully applied target, never the editable candidates. Existing startup-only installations do not gain periodic writes automatically.
+
+Every 300 seconds, the integration reads the file and the existing shared resolver. Healthy checks do not write files, probe DNS, reset resolver caches or emit recovery logs. A mismatch is repaired once using the existing preflight, hash guard, backup and rollback path. Runtime-only drift refreshes the resolver without rewriting the file. Recovery is reported only after file and runtime IP addresses and DNS ports match the saved target.
+
+A failed attempt is shown as **Retry pending**, with an error, timestamp and consecutive failure count. It retries on the next five-minute tick, without an immediate loop. For example, a startup preflight can fail while the network is not yet reachable; a later periodic check can recover once it is reachable. Startup observation does not duplicate a failed startup write attempt. A slow/manual operation holds the same lock; overlapping timer ticks are skipped rather than queued. Removing/reloading the integration removes its timer.
+
+A verified file rollback can be retried. An interrupted write or failed rollback is shown as **Manual inspection required** and is not automatically overwritten. **Restore original DNS** disables both automatic policies. Turning periodic repair off leaves DNS unchanged; periodic read-only status refresh continues.
+
+The integration emits `resolver_inspector_status` events with `kind` = `problem`, `retry_pending` or `recovered`, plus status, time, expected servers and failure details. The initial mismatch and each failed attempt are logged; recovery is logged at INFO. No event is emitted for unchanged healthy checks. To forward reliably through **Remote Logger**, including INFO recovery when HA's default log level is WARNING, use an event automation:
+
+```yaml
+alias: DNS monitor to Syslog
+triggers:
+  - trigger: event
+    event_type: resolver_inspector_status
+actions:
+  - action: remote_logger.send_log
+    data:
+      event: DNS_MONITOR
+      level: "{{ 'INFO' if trigger.event.data.kind == 'recovered' else 'WARNING' }}"
+      message: >-
+        [DNS_MONITOR] {{ trigger.event.data.kind }};
+        target={{ trigger.event.data.get('expected_servers', []) | join(', ') }};
+        failures={{ trigger.event.data.consecutive_failures }};
+        error={{ trigger.event.data.error or '-' }}
+mode: queued
+```
+
+This automation requires a configured Remote Logger endpoint; DNS Manager itself has no Syslog destination or dependency on Remote Logger. Configuration consistency is monitored, not continuous DNS server availability. Healthy matching settings do not establish that every DNS lookup or every AI Hub application works. The existing **Check DNS resolution** action performs active lookup tests when needed.
 
 ## Actions
 
@@ -67,11 +101,13 @@ All actions require an administrator (or Home Assistant's own automation context
 - `resolver_inspector.apply`: `servers` (list of literal IPs; optional, otherwise candidates) and `expected_sha256` from the latest inspection. Hash comparison refuses a changed file. Symlinks/nonregular files are refused.
 - `resolver_inspector.restore`: `expected_sha256` from a fresh inspection; disable startup reapplication and restore exact original contents.
 - `resolver_inspector.configure_startup`: required boolean `enabled`; persist the startup policy without changing DNS immediately. Enabling requires a successful apply with 0.3.0 or later.
+- `resolver_inspector.configure_watchdog`: required boolean `enabled`; persist the periodic policy and immediately check. Requires a successful applied target before enabling.
+- `resolver_inspector.monitor_now`: one monitor check; repairs only while the periodic policy is enabled.
 - `resolver_inspector.refresh_runtime`: reload the current resolver file into HA's existing shared resolver, verify the result and clear its connector DNS caches. Does not write the file or change the saved startup target.
 
 Backups live in `/config/.storage/resolver_inspector_backup.json` (relative to the actual HA configuration directory), mode0600, with an integrity hash. Do not delete that backup before restoration. Writes preserve the existing resolver inode, mount, owner and mode. A normal write or verification failure attempts rollback; interruption or a failed rollback can require explicit restoration. A pending/failed write is reported and is not replayed at startup. System resolver caches and already-open connections can delay effective changes; a successful lookup alone cannot prove the upstream used by every integration.
 
-Before a first write, inspect mount metadata to determine what owns the file and whether a change could affect a shared runtime. Availability of read/write access does not establish mount isolation. Changes affect the resolver file visible inside HA, not necessarily every application on the appliance. DNS probes are sent when checking or applying, including an enabled startup reapplication, to the selected DNS servers. Results are not uploaded; startup success or failure is logged locally. Reads can update access timestamps.
+Before a first write, inspect mount metadata to determine what owns the file and whether a change could affect a shared runtime. Availability of read/write access does not establish mount isolation. Changes affect the resolver file visible inside HA, not necessarily every application on the appliance. DNS probes are sent when checking or applying, including an enabled startup reapplication, to the selected DNS servers. Results are not uploaded; startup and periodic repair outcomes are logged locally; status events can be forwarded through an automation. Reads can update access timestamps.
 
 ## Remove
 
@@ -81,7 +117,7 @@ Restore the original DNS first if desired. Removing the integration or uninstall
 
 GitHub Actions run the official HACS validation, hassfest, and the local unit tests on pushes and pull requests. No HACS checks are disabled.
 
-Version **0.4.0** adds runtime refresh, diagnostics and checks. Version **0.3.0** adds the opt-in startup policy and saved successful target. Version **0.2.1** added HACS distribution metadata and brand icons.
+Version **0.5.0** adds opt-in periodic comparison/repair, retry status and transition events. Version **0.4.0** adds runtime refresh, diagnostics and checks. Version **0.3.0** adds the opt-in startup policy and saved successful target. Version **0.2.1** added HACS distribution metadata and brand icons.
 
 ## Local verification
 
@@ -101,3 +137,5 @@ The integration code and documentation were generated with **OpenAI Codex** and 
 ## License
 
 MIT License. See [LICENSE](LICENSE).
+
+Periodic tests use real temporary-file transactions with controlled network errors. They cover failed preflight followed by a later successful tick, verified rollback, blocked uncertain writes, runtime-only repair, readback mismatch, concurrent file changes, disabled/restored policies, timer interval/overlap handling and silent healthy checks.

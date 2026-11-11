@@ -35,15 +35,28 @@
         "name": "Current DNS servers"
       },
       "last_result": {
-        "name": "Last DNS operation"
+        "name": "Last DNS file operation (historical)"
       },
       "runtime_servers": {
         "name": "Running HA DNS servers"
+      },
+      "monitor_status": {
+        "name": "DNS monitor status",
+        "state": {
+          "disabled": "Disabled",
+          "pending": "Pending",
+          "healthy": "Healthy",
+          "retry_pending": "Retry pending",
+          "manual_action_required": "Manual inspection required"
+        }
       }
     },
     "switch": {
       "startup_reapply": {
         "name": "Reapply saved DNS at startup"
+      },
+      "watchdog_enabled": {
+        "name": "Monitor and repair DNS every 5 minutes"
       }
     }
   }
