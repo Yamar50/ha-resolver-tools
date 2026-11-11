@@ -28,6 +28,12 @@
       },
       "refresh_runtime": {
         "name": "Refresh running HA DNS"
+      },
+      "repair_localhost": {
+        "name": "Repair localhost in hosts"
+      },
+      "restore_hosts": {
+        "name": "Restore original hosts file"
       }
     },
     "sensor": {
@@ -49,6 +55,16 @@
           "retry_pending": "Retry pending",
           "manual_action_required": "Manual inspection required"
         }
+      },
+      "hosts_monitor_status": {
+        "name": "Localhost hosts monitor status",
+        "state": {
+          "disabled": "Disabled",
+          "pending": "Pending",
+          "healthy": "Healthy",
+          "retry_pending": "Retry pending",
+          "manual_action_required": "Manual inspection required"
+        }
       }
     },
     "switch": {
@@ -57,6 +73,9 @@
       },
       "watchdog_enabled": {
         "name": "Monitor and repair DNS every 5 minutes"
+      },
+      "hosts_watchdog_enabled": {
+        "name": "Repair localhost at startup and every 5 minutes"
       }
     }
   }

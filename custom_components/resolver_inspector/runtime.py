@@ -113,3 +113,13 @@ async def probe_runtime(resolver, names):
             results.append({"name": name, "success": False, "error": type(error).__name__})
     return {"result": "passed" if all(r["success"] for r in results) else "failed",
             "checks": results}
+
+
+async def probe_localhost(resolver):
+    """Explicit diagnostic; caller first requires valid local hosts mappings."""
+    if resolver is None:
+        return {"success": False, "status": "not_initialized", "addresses": []}
+    async with asyncio.timeout(5):
+        answers = await resolver.resolve("localhost", 0, socket.AF_UNSPEC)
+    addresses = sorted({str(ipaddress.ip_address(answer["host"])) for answer in answers})
+    return {"success": set(addresses) == {"127.0.0.1", "::1"}, "addresses": addresses}

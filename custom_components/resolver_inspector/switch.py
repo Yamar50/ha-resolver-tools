@@ -7,7 +7,8 @@ from .entity import ResolverEntity
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    async_add_entities([StartupReapply(entry, "startup_reapply"), AutomaticRepair(entry, "watchdog_enabled")])
+    async_add_entities([StartupReapply(entry, "startup_reapply"), AutomaticRepair(entry, "watchdog_enabled"),
+                        HostsRepair(entry, "hosts_watchdog_enabled")])
 
 
 class StartupReapply(ResolverEntity, SwitchEntity):
@@ -40,5 +41,19 @@ class AutomaticRepair(StartupReapply):
     async def _set_enabled(self, enabled):
         await self.hass.services.async_call(
             DOMAIN, "configure_watchdog", {"enabled": enabled},
+            blocking=True, context=self._context,
+        )
+
+
+class HostsRepair(StartupReapply):
+    _attr_icon = "mdi:home-check"
+
+    @property
+    def is_on(self):
+        return self.entry.runtime_data["hosts"].get("enabled", False)
+
+    async def _set_enabled(self, enabled):
+        await self.hass.services.async_call(
+            DOMAIN, "configure_hosts_watchdog", {"enabled": enabled},
             blocking=True, context=self._context,
         )

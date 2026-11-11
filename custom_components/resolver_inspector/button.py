@@ -5,7 +5,7 @@ from .entity import ResolverEntity
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    async_add_entities([ResolverButton(entry, name) for name in ("apply", "restore", "inspect", "refresh_runtime")])
+    async_add_entities([ResolverButton(entry, name) for name in ("apply", "restore", "inspect", "refresh_runtime", "repair_localhost", "restore_hosts")])
 
 
 class ResolverButton(ResolverEntity, ButtonEntity):
@@ -15,8 +15,9 @@ class ResolverButton(ResolverEntity, ButtonEntity):
 
     async def async_press(self):
         data = {}
-        if self.action in ("apply", "restore"):
-            result = await self.hass.services.async_call(DOMAIN, "inspect", {}, blocking=True,
+        if self.action in ("apply", "restore", "repair_localhost", "restore_hosts"):
+            inspect_action = "inspect_hosts" if self.action in ("repair_localhost", "restore_hosts") else "inspect"
+            result = await self.hass.services.async_call(DOMAIN, inspect_action, {}, blocking=True,
                                                         return_response=True, context=self._context)
             data["expected_sha256"] = result["content_sha256"]
         await self.hass.services.async_call(DOMAIN, self.action, data, blocking=True, context=self._context)

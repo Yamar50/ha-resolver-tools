@@ -14,8 +14,9 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.service import async_register_admin_service
 
 from .inspect import inspect_resolver
+from .hosts import HostsManager, HostsWatchdog, check_system_localhost
 from .resolver import PROBE_NAMES, ResolverManager, mount_info, nameservers, normalize_servers, probe_servers, system_probe
-from .runtime import RuntimeRefreshError, inspect_runtime, probe_runtime, refresh_runtime
+from .runtime import RuntimeRefreshError, inspect_runtime, probe_runtime, probe_localhost, refresh_runtime
 from .watchdog import DNSWatchdog, INTERVAL_SECONDS
 
 DOMAIN = "resolver_inspector"
@@ -28,15 +29,25 @@ async def async_setup_entry(hass, entry):
     if entry.title == "Resolver Inspector":
         hass.config_entries.async_update_entry(entry, title="DNS Manager")
     manager = ResolverManager(hass.config.path(".storage", "resolver_inspector_backup.json"))
+    hosts_manager = HostsManager(hass.config.path(".storage", "resolver_inspector_hosts_backup.json"))
     lock = asyncio.Lock()
     runtime = {"manager": manager, "lock": lock, "inspection": {}, "status": {},
-               "runtime_dns": {}, "last_runtime_refresh": {"result": "not_requested"}}
+               "runtime_dns": {}, "hosts": {}, "last_runtime_refresh": {"result": "not_requested"}}
     entry.runtime_data = runtime
+
+    async def refresh_hosts():
+        try:
+            runtime["hosts"] = await hass.async_add_executor_job(hosts_manager.inspect)
+        except Exception as error:
+            # Hosts failures must not stop the independent DNS repair path.
+            runtime["hosts"] = {"error": f"{type(error).__name__}: {error}"}
+        return runtime["hosts"]
 
     async def refresh():
         runtime["inspection"] = await hass.async_add_executor_job(inspect_resolver)
         runtime["status"] = await hass.async_add_executor_job(manager.status)
         runtime["runtime_dns"] = inspect_runtime(hass.data.get(DATA_RESOLVER))
+        await refresh_hosts()
         async_dispatcher_send(hass, SIGNAL)
         return runtime
 
@@ -64,7 +75,8 @@ async def async_setup_entry(hass, entry):
             return {**runtime["inspection"], "mount": await hass.async_add_executor_job(mount_info),
                     "management": runtime["status"], "runtime_dns": runtime["runtime_dns"],
                     "last_runtime_refresh": runtime["last_runtime_refresh"],
-                    "monitor": dict(watchdog.state)}
+                    "monitor": dict(watchdog.state), "hosts": runtime["hosts"],
+                    "hosts_monitor": dict(hosts_watchdog.state)}
 
     async def check_action(call):
         async with lock:
@@ -118,18 +130,79 @@ async def async_setup_entry(hass, entry):
         return await hass.async_add_executor_job(manager.apply, servers, digest)
 
     def emit_status(event):
+        event = {"resource": "dns", **event}
         hass.bus.async_fire(DOMAIN + "_status", event)
+        label = "HOSTS_MONITOR" if event["resource"] == "hosts" else "DNS_MONITOR"
         if event["kind"] == "recovered":
-            _LOGGER.info("DNS_MONITOR recovered: saved, file and running DNS match")
+            _LOGGER.info("%s recovered: monitored settings match", label)
         else:
-            _LOGGER.warning("DNS_MONITOR %s: %s", event["kind"], event.get("error") or "DNS mismatch")
+            _LOGGER.warning("%s %s: %s", label, event["kind"], event.get("error") or "Settings mismatch")
+
+    async def repair_hosts(digest):
+        result = await hass.async_add_executor_job(hosts_manager.repair, digest)
+        # A previous localhost HTTP lookup may be cached on HA connectors.
+        if result["result"] == "repaired":
+            resolver = hass.data.get(DATA_RESOLVER)
+            for connector in hass.data.get(DATA_CONNECTOR, {}).values():
+                if resolver is not None and getattr(connector, "_resolver", None) is resolver:
+                    connector.clear_dns_cache()
+        return result
 
     watchdog = DNSWatchdog(refresh, apply_saved, sync_runtime, emit_status)
     runtime["monitor"] = watchdog.state
+    hosts_watchdog = HostsWatchdog(refresh_hosts, repair_hosts, emit_status)
+    runtime["hosts_monitor"] = hosts_watchdog.state
+
+    async def hosts_inspect_action(call):
+        async with lock:
+            result = await refresh_hosts()
+            return {**result, "monitor": dict(hosts_watchdog.state),
+                    "mount": await hass.async_add_executor_job(mount_info, hosts_manager.path)}
+
+    async def check_localhost_action(call):
+        async with lock:
+            snapshot = await refresh_hosts()
+            if not snapshot.get("matches"):
+                raise HomeAssistantError("Repair localhost mappings before running lookup diagnostics")
+            return {"system": await hass.async_add_executor_job(check_system_localhost),
+                    "runtime": await probe_localhost(hass.data.get(DATA_RESOLVER))}
+
+    async def hosts_change(call, restore=False):
+        async with lock:
+            try:
+                if restore:
+                    result = await hass.async_add_executor_job(hosts_manager.restore, call.data["expected_sha256"])
+                else:
+                    result = await repair_hosts(call.data["expected_sha256"])
+                await hosts_watchdog.check()
+                return result
+            except (OSError, ValueError) as error:
+                raise HomeAssistantError(str(error)) from error
+            finally:
+                await refresh_hosts()
+                async_dispatcher_send(hass, SIGNAL)
+
+    async def repair_localhost_action(call):
+        return await hosts_change(call)
+
+    async def restore_hosts_action(call):
+        return await hosts_change(call, restore=True)
+
+    async def configure_hosts_action(call):
+        async with lock:
+            try:
+                await hass.async_add_executor_job(hosts_manager.configure, call.data["enabled"])
+                return await hosts_watchdog.check()
+            except (OSError, ValueError) as error:
+                raise HomeAssistantError(str(error)) from error
+            finally:
+                await refresh_hosts()
+                async_dispatcher_send(hass, SIGNAL)
 
     async def monitor_now_action(call):
         async with lock:
             result = await watchdog.check()
+            result["hosts"] = await hosts_watchdog.check()
             async_dispatcher_send(hass, SIGNAL)
             return result
 
@@ -160,6 +233,11 @@ async def async_setup_entry(hass, entry):
         "refresh_runtime": (refresh_runtime_action, empty),
         "monitor_now": (monitor_now_action, empty),
         "configure_watchdog": (configure_watchdog_action, vol.Schema({vol.Required("enabled"): bool})),
+        "inspect_hosts": (hosts_inspect_action, empty),
+        "check_localhost": (check_localhost_action, empty),
+        "repair_localhost": (repair_localhost_action, vol.Schema(digest_schema)),
+        "restore_hosts": (restore_hosts_action, vol.Schema(digest_schema)),
+        "configure_hosts_watchdog": (configure_hosts_action, vol.Schema({vol.Required("enabled"): bool})),
     }
     for name, (action, schema) in actions.items():
         async_register_admin_service(hass, DOMAIN, name, action, schema=schema,
@@ -194,6 +272,7 @@ async def async_setup_entry(hass, entry):
         entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, started))
     entry.async_on_unload(async_track_time_interval(hass, periodic, timedelta(seconds=INTERVAL_SECONDS)))
     async with lock:
+        await hosts_watchdog.check()
         await watchdog.check(repair=False)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -202,6 +281,7 @@ async def async_setup_entry(hass, entry):
 async def async_unload_entry(hass, entry):
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
-    for name in ("inspect", "check", "apply", "restore", "configure_startup", "refresh_runtime", "configure_watchdog", "monitor_now"):
+    for name in ("inspect", "check", "apply", "restore", "configure_startup", "refresh_runtime", "configure_watchdog", "monitor_now",
+                 "inspect_hosts", "check_localhost", "repair_localhost", "restore_hosts", "configure_hosts_watchdog"):
         hass.services.async_remove(DOMAIN, name)
     return True

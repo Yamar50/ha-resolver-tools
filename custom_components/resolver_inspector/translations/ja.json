@@ -28,6 +28,12 @@
       },
       "refresh_runtime": {
         "name": "稼働中のHA DNSへ再反映"
+      },
+      "repair_localhost": {
+        "name": "hostsのlocalhostを修復"
+      },
+      "restore_hosts": {
+        "name": "元のhostsファイルに戻す"
       }
     },
     "sensor": {
@@ -49,6 +55,16 @@
           "retry_pending": "再試行待ち",
           "manual_action_required": "手動確認が必要"
         }
+      },
+      "hosts_monitor_status": {
+        "name": "localhostのhosts監視状態",
+        "state": {
+          "disabled": "無効",
+          "pending": "確認待ち",
+          "healthy": "正常",
+          "retry_pending": "再試行待ち",
+          "manual_action_required": "手動確認が必要"
+        }
       }
     },
     "switch": {
@@ -57,6 +73,9 @@
       },
       "watchdog_enabled": {
         "name": "5分ごとにDNSを監視・自動修復"
+      },
+      "hosts_watchdog_enabled": {
+        "name": "起動時・5分ごとにlocalhostを監視・修復"
       }
     }
   }

@@ -65,6 +65,11 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.manager.reapply_on_startup.return_value = {"result": "already_matches", "servers": ["192.0.2.53"]}
         self.manager.apply.side_effect = self.apply_file
         self.manager.restore.side_effect = self.restore_file
+        self.hosts = Mock()
+        self.hosts_status = {"enabled": False, "matches": False, "last_result": "observed", "content_sha256": "test"}
+        self.hosts.inspect.side_effect = lambda: dict(self.hosts_status)
+        self.hosts.configure.side_effect = lambda enabled: self.hosts_status.update(enabled=enabled)
+        self.hosts.repair.side_effect = lambda sha: self.hosts_status.update(matches=True, last_result="applied") or {"result": "repaired"}
         self.hass = SimpleNamespace(
             data={"resolver": self.resolver, "connectors": {"default": self.connector}},
             actions={}, timers=[], is_running=False, config=SimpleNamespace(path=lambda *p: "/unused-test-backup"),
@@ -78,6 +83,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
                                      async_on_unload=Mock())
         self.addCleanup(patch.stopall)
         patch.object(self.integration, "ResolverManager", return_value=self.manager).start()
+        patch.object(self.integration, "HostsManager", return_value=self.hosts).start()
         patch.object(self.integration, "inspect_resolver", side_effect=lambda: {"content": "".join("nameserver " + s + "\n" for s in self.file_servers)}).start()
         patch.object(self.integration, "mount_info", return_value={}).start()
         patch.object(self.integration, "_LOGGER").start()
@@ -191,3 +197,46 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.entry.runtime_data["monitor"]["status"], "disabled")
         await self.integration.async_unload_entry(self.hass, self.entry)
         self.hass.services.async_remove.assert_any_call("resolver_inspector", "monitor_now")
+
+    async def test_hosts_optin_and_timer_do_not_enable_dns_repair(self):
+        self.disable_startup()
+        await self.setup()
+        self.hosts.repair.assert_not_called()
+        await self.call("configure_hosts_watchdog", enabled=True)
+        self.hosts.repair.assert_called_once_with("test")
+        self.manager.apply.assert_not_called()
+        self.assertFalse(self.status.get("watchdog_enabled", False))
+        self.hosts_status["matches"] = False
+        await self.hass.timers[0][0](None)
+        self.assertEqual(self.hosts.repair.call_count, 2)
+        await self.call("configure_hosts_watchdog", enabled=False)
+        self.hosts_status["matches"] = False
+        await self.hass.timers[0][0](None)
+        self.assertEqual(self.hosts.repair.call_count, 2)
+
+    async def test_hosts_failure_does_not_block_dns_observation(self):
+        self.hosts.inspect.side_effect = OSError("hosts temporarily unreadable")
+        await self.setup()
+        result = await self.call("monitor_now")
+        self.assertEqual(result["status"], "disabled")
+        self.assertEqual(result["hosts"]["status"], "retry_pending")
+        self.assertEqual(self.channel.servers, ["192.0.2.53:53"])
+
+    async def test_hosts_policy_repaired_at_startup_and_removed_at_unload(self):
+        self.hosts_status["enabled"] = True
+        await self.setup()
+        self.hosts.repair.assert_called_once_with("test")
+        await self.integration.async_unload_entry(self.hass, self.entry)
+        self.hass.services.async_remove.assert_any_call("resolver_inspector", "configure_hosts_watchdog")
+
+    async def test_localhost_diagnostic_refuses_lookup_until_file_is_correct(self):
+        await self.setup()
+        with patch.object(self.integration, "check_system_localhost") as system:
+            with self.assertRaises(HAError):
+                await self.call("check_localhost")
+            system.assert_not_called()
+        self.hosts_status["matches"] = True
+        with patch.object(self.integration, "check_system_localhost", return_value={"success": True}), patch.object(self.integration, "probe_localhost", new=AsyncMock(return_value={"success": True})):
+            result = await self.call("check_localhost")
+        self.assertTrue(result["system"]["success"])
+        self.assertTrue(result["runtime"]["success"])

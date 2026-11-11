@@ -13,19 +13,22 @@ nameserver 114.114.114.114
 
 This can be a problem when you want Home Assistant to resolve local hostnames through your router, use a local DNS service such as Pi-hole or AdGuard Home, or operate on a network that restricts external DNS access.
 
-DNS Manager lets you choose your preferred DNS servers from the Home Assistant UI, without opening a shell inside the container. It changes `/etc/resolv.conf`, refreshes Home Assistant's existing shared DNS resolver, and can restore the original file. It does not configure DNS for the entire AI Hub or its other applications.
+DNS Manager lets you choose your preferred DNS servers from the Home Assistant UI, without opening a shell inside the container. It changes `/etc/resolv.conf`, refreshes Home Assistant's existing shared DNS resolver, and can restore the original file. Version 0.6.0 also provides separate localhost repair for `/etc/hosts`. It does not configure DNS for the entire AI Hub or its other applications.
 
 ## Tested environment
 
-Verified on **October 30, 2026**, with the following combination:
+Latest completed live verification: **November 11, 2026**.
 
-| Component | Tested version |
+| Component | Verified environment |
 | --- | --- |
-| SwitchBot AI Hub firmware | **V3.2** |
-| Home Assistant Core | **2026.10.4** (Home Assistant Container) |
-| DNS Manager | **0.2.0** |
+| Hardware | SwitchBot AI Hub |
+| Home Assistant Core | **2026.11.0**, Home Assistant Container |
+| DNS Manager | **0.5.0** (five-minute DNS repair); 0.6.0 localhost support is undergoing validation |
+| Python | **3.14.10** |
+| Resolver libraries | aiohttp **3.14.5**, aiohttp-asyncmdnsresolver **0.2.0**, aiodns **4.0.4**, pycares **5.2.1** (November 11 readback) |
+| AI Hub firmware | **V3.2**, last checked October 30; not rechecked for the November tests |
 
-The two public DNS addresses above were observed on this tested installation. **Other AI Hub firmware versions, Home Assistant versions, devices, and installation types have not been tested.** This is not a claim that every AI Hub version uses the same defaults.
+Earlier checks used HA **2026.10.4** with DNS Manager 0.2.0–0.4.0. The observations below refer to this one installation; other appliances, firmware versions and installation types have not been verified. The default public DNS addresses above are observations, not a guarantee about every AI Hub.
 
 Changing the DNS server, resolving names through the selected server, and keeping the change through a **normal Home Assistant restart** were verified. The resolver file's contents, hash, inode, and modification time remained unchanged after that restart, with **no automatic reapplication** by this integration.
 
@@ -92,10 +95,44 @@ mode: queued
 
 This automation requires a configured Remote Logger endpoint; DNS Manager itself has no Syslog destination or dependency on Remote Logger. Configuration consistency is monitored, not continuous DNS server availability. Healthy matching settings do not establish that every DNS lookup or every AI Hub application works. The existing **Check DNS resolution** action performs active lookup tests when needed.
 
+## Localhost hosts repair
+
+Version **0.6.0** adds a separate opt-in policy for `/etc/hosts`. On November 11, this installation's hosts file was observed to be empty. That can leave localhost resolution dependent on the resolver implementation. The observation does not establish when the file became empty or which application issued the historical DNS requests.
+
+On the **Home Assistant DNS** device:
+
+- **Repair localhost in hosts** backs up the original file once and ensures these mappings:
+
+  ```text
+  127.0.0.1 localhost
+  ::1 localhost
+  ```
+
+- **Repair localhost at startup and every 5 minutes** takes the original backup before the first enable, checks immediately, and then checks at integration startup and on the same 300-second timer as DNS. This switch is independent of both DNS switches and defaults to off.
+- **Localhost hosts monitor status** shows the policy status. Its attributes include observed localhost addresses, whether the mappings match, backup availability, last operation, errors and check/recovery times. It does not expose unrelated hosts entries as sensor attributes.
+- **Restore original hosts file** disables only the hosts policy and restores the exact original bytes. If the original file was empty, restoration makes it empty again. Disable the switch instead if you want to keep the repaired file.
+
+Only the alias `localhost` is managed. Other names and comments are retained, including aliases sharing a conflicting localhost line. Correct existing IPv4/IPv6 mappings are left byte-for-byte unchanged. No arbitrary hostname/IP editor is provided. Invalid localhost addresses, non-UTF-8 content, oversized files, symlinks and nonregular files are refused. Writes retain the inode, owner and permissions and use a fresh hash guard. The separate mode-0600 backup is `/config/.storage/resolver_inspector_hosts_backup.json`.
+
+Monitoring reads the file without issuing name-resolution requests. Healthy ticks do not rewrite it or clear caches. Changed localhost mappings clear HA's shared-connector DNS caches, leaving sessions and open connections intact. Failed writes retry on the next tick only after a verified rollback; an interrupted/uncertain write requires manual inspection. No automatic HA restart is used. Startup runs concurrently with other integrations, so it cannot promise to prevent queries issued before DNS Manager loads.
+
+Hosts transitions use the same `resolver_inspector_status` event with `resource: hosts`; DNS events use `resource: dns`. The `kind`, timestamps and failure fields are shared. Existing DNS-only automations should filter `resource` or label both correctly. For example, change the example above's event label to:
+
+```yaml
+event: "{{ 'HOSTS_MONITOR' if trigger.event.data.get('resource') == 'hosts' else 'DNS_MONITOR' }}"
+```
+
+The explicit `resolver_inspector.check_localhost` diagnostic checks the system and HA shared resolver for exactly `127.0.0.1` and `::1`. It refuses to run until the file mappings are correct. Its result is separate from the passive file-monitor status; external packet observation is needed to verify the absence of DNS traffic. Integrations bypassing the hosts file or using their own resolvers remain outside the guarantee.
+
 ## Actions
 
 All actions require an administrator (or Home Assistant's own automation context). They accept optional responses:
 
+- `resolver_inspector.inspect_hosts`: read the fixed hosts file, hash, mappings, mount and policy.
+- `resolver_inspector.repair_localhost`: repair localhost with `expected_sha256` from a fresh hosts inspection.
+- `resolver_inspector.restore_hosts`: restore exact original hosts with a fresh `expected_sha256`; disable its automatic policy.
+- `resolver_inspector.configure_hosts_watchdog`: required boolean `enabled`; back up before first enable and check immediately.
+- `resolver_inspector.check_localhost`: explicit system/shared-resolver loopback verification after the file is correct.
 - `resolver_inspector.inspect`: fixed-file content up to16KiB, hash, ownership, permissions, effective process access, filesystem read-only flag, Linux mount metadata, backup status, runtime DNS servers and last runtime refresh. Read only; access checks do not prove write success.
 - `resolver_inspector.check`: bounded direct DNS A queries, system lookups and lookups through HA's running shared resolver for `api.switch-bot.com` and `www.home-assistant.io`. No HTTP/API requests are made.
 - `resolver_inspector.apply`: `servers` (list of literal IPs; optional, otherwise candidates) and `expected_sha256` from the latest inspection. Hash comparison refuses a changed file. Symlinks/nonregular files are refused.
@@ -111,13 +148,13 @@ Before a first write, inspect mount metadata to determine what owns the file and
 
 ## Remove
 
-Restore the original DNS first if desired. Removing the integration or uninstalling its files does not restore DNS automatically and does not delete the backup. Restart as requested by HACS.
+Restore the original DNS and/or hosts first if desired. Each has its own backup and restore action. Removing the integration or uninstalling its files does not restore DNS automatically and does not delete the backup. Restart as requested by HACS.
 
 ## Development and validation
 
 GitHub Actions run the official HACS validation, hassfest, and the local unit tests on pushes and pull requests. No HACS checks are disabled.
 
-Version **0.5.0** adds opt-in periodic comparison/repair, retry status and transition events. Version **0.4.0** adds runtime refresh, diagnostics and checks. Version **0.3.0** adds the opt-in startup policy and saved successful target. Version **0.2.1** added HACS distribution metadata and brand icons.
+Version **0.6.0** adds independent localhost hosts repair, monitoring, backup/restore and explicit lookup diagnostics. Version **0.5.0** adds opt-in periodic comparison/repair, retry status and transition events. Version **0.4.0** adds runtime refresh, diagnostics and checks. Version **0.3.0** adds the opt-in startup policy and saved successful target. Version **0.2.1** added HACS distribution metadata and brand icons.
 
 ## Local verification
 
@@ -134,8 +171,10 @@ Runtime and lifecycle tests additionally cover stale channels, asynchronous relo
 
 The integration code and documentation were generated with **OpenAI Codex** and refined using automated tests and the live-device checks documented above. The tested environment and verification limits are stated explicitly in this README.
 
+Periodic tests use real temporary-file transactions with controlled network errors. They cover failed preflight followed by a later successful tick, verified rollback, blocked uncertain writes, runtime-only repair, readback mismatch, concurrent file changes, disabled/restored policies, timer interval/overlap handling and silent healthy checks.
+
+Hosts tests cover empty-file repair, exact restore, alias/comment preservation, no-op ticks, same-inode writes, malformed/oversized content, symlinks, stale hashes, backup corruption, retry after write failure, interrupted writes, simulated file replacement, and independent DNS/hosts policy lifecycle.
+
 ## License
 
 MIT License. See [LICENSE](LICENSE).
-
-Periodic tests use real temporary-file transactions with controlled network errors. They cover failed preflight followed by a later successful tick, verified rollback, blocked uncertain writes, runtime-only repair, readback mismatch, concurrent file changes, disabled/restored policies, timer interval/overlap handling and silent healthy checks.

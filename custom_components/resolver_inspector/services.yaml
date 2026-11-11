@@ -53,3 +53,37 @@ configure_watchdog:
 monitor_now:
   name: Check DNS monitor now
   description: Compare current file and runtime against the saved target and repair only if periodic repair is enabled. One attempt; failed attempts wait for the next five-minute tick. Returns monitor status.
+inspect_hosts:
+  name: Inspect localhost hosts configuration
+  description: Administrator-only inspection of /etc/hosts, localhost mappings, file hash, mount, original backup and repair policy. No lookup or file changes.
+check_localhost:
+  name: Check localhost resolution
+  description: Administrator-only system and HA shared-resolver lookups. Requires correct localhost hosts mappings first. Reports exact loopback addresses; not part of the periodic monitor.
+repair_localhost:
+  name: Repair localhost in hosts
+  description: Back up /etc/hosts once and ensure localhost maps only to 127.0.0.1 and ::1. Preserve other aliases and comments. Does not enable periodic repair or change DNS servers.
+  fields:
+    expected_sha256:
+      name: Current hosts SHA-256
+      description: Obtain content_sha256 from inspect_hosts immediately before applying.
+      required: true
+      selector:
+        text:
+restore_hosts:
+  name: Restore original hosts file
+  description: Disable localhost automatic repair and restore the exact original hosts bytes, even if the original file was empty. DNS policies are unchanged.
+  fields:
+    expected_sha256:
+      name: Current hosts SHA-256
+      required: true
+      selector:
+        text:
+configure_hosts_watchdog:
+  name: Configure localhost automatic repair
+  description: Back up the original hosts before first enable, repair immediately and check at startup and every five minutes. Failures retry on later checks; uncertain writes need manual inspection. Independent of DNS repair.
+  fields:
+    enabled:
+      name: Repair localhost at startup and every 5 minutes
+      required: true
+      selector:
+        boolean:
